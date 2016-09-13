@@ -272,8 +272,10 @@ int wrn_endpoint_probe(struct net_device *dev)
 	err = register_netdev(dev);
 
 	/* Increment MAC address for next endpoint */
-	val = get_unaligned_be32(wraddr + 2);
-	put_unaligned_be32(val + 1, wraddr + 2);
+	if (ep->ep_number != 1) { // HSR, make wr1 and wr2 have the same mac address.
+		val = get_unaligned_be32(wraddr + 2);
+		put_unaligned_be32(val + 1, wraddr + 2);
+	}
 
 	if (err) {
 		printk(KERN_ERR DRV_NAME "Can't register dev %s\n",
