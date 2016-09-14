@@ -2,6 +2,7 @@ TOOLS = rtu_stat wr_mon wr_phytool spll_dbg_proxy load-lm32 load-virtex com
 TOOLS += mapper wmapper
 TOOLS += wrsw_version wr_date wr_management lm32-vuart wrsw_pstats
 TOOLS += wrsw_vlans
+TOOLS += wrsw_hsr_info
 
 # # Standard stanza for cross-compilation (courtesy of the linux makefile)
 
@@ -84,6 +85,9 @@ lm32-vuart: lm32-vuart.o
 	${CC} -o $@ $^ $(LDFLAGS)
 
 wrsw_vlans: wrsw_vlans.o
+	${CC} -o $@ $^ $(LDFLAGS)
+	
+wrsw_hsr_info: wrsw_hsr_info.o term.o
 	${CC} -o $@ $^ $(LDFLAGS)
 
 clean:
