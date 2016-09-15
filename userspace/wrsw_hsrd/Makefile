@@ -19,7 +19,7 @@ ifdef WRS_HAL_DEBUG
 endif
 
 LDFLAGS = -L../libswitchhw -L../mini-rpc \
-	 -lminipc -llua -lm -ldl -lswitchhw 
+	 -lminipc -llua -lm -ldl -lswitchhw  -lpthread
 
 all: $(BINARY)
 
