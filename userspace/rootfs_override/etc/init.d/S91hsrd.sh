@@ -4,7 +4,7 @@
 #
 start() {
  	echo -n "Starting hsrd daemon: "
-	/usr/sbin/wrsw_hsrd
+	/usr/sbin/wrsw_hsrd /wr/etc/hsr.conf
 	echo "OK"
 }
 stop() {

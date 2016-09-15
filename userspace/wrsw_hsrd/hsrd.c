@@ -37,6 +37,16 @@
 #include <fcntl.h>
 #include <sys/mman.h>
 
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+#include <signal.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <syslog.h>
+#include <trace.h>
+
+
 #define WB_HSR_BASE_ADDR 0x10061000
 #define WB_BRAM_OFFSET 4
 #define WB_BRAM_SIZE 200000
@@ -52,7 +62,46 @@
 #define WR0_ACC 	0x0000001c
 #define WR1_ACC 	0x00000020
 
-void init_hsr(void){
+#define MAX_HSR_NODES	32
+
+struct hsrInfo
+{
+	int enabled;
+};
+
+struct NodeTable
+{
+  int mac[6];
+  int SupSeq;
+  int reserved_for_something;
+};
+
+void load_config(struct hsrInfo *hsr_config, char *filename){
+	
+	FILE * fp;
+    char * line = NULL;
+    size_t len = 0;
+    ssize_t read;
+
+    fp = fopen(filename, "r");
+    if (fp == NULL)
+        exit(EXIT_FAILURE);
+
+    while ((read = getline(&line, &len, fp)) != -1) {
+		if (strstr(line, "HSR_ENABLED") != NULL) {
+			if(strstr(line, "y") != NULL) {
+				hsr_config->enabled = 1;
+			}else{
+				hsr_config->enabled = 0;
+			}
+		}
+    }
+
+    fclose(fp);
+    if (line)
+        free(line);
+}
+void init_hsr(struct hsrInfo *hsr_config){
 	
 	int memfd;
     void *mapped_base, *mapped_dev_base; 
@@ -73,21 +122,88 @@ void init_hsr(void){
   
     mapped_dev_base = mapped_base + (dev_base & WB_BRAM_MASK); 
     	
+	if(hsr_config->enabled)
+		*((volatile unsigned long *) (mapped_dev_base + LRE_C)) = (*((volatile unsigned long *) (mapped_dev_base + LRE_C)) | (1 << 1));
+	else 
+		*((volatile unsigned long *) (mapped_dev_base + LRE_C)) = (*((volatile unsigned long *) (mapped_dev_base + LRE_C)) & ~(1 << 1));
 	
-	*((volatile unsigned long *) (mapped_dev_base + LRE_C)) = (*((volatile unsigned long *) (mapped_dev_base + LRE_C)) | (1 << 1));
+	//Clear all registers.
+	*((volatile unsigned long *) (mapped_dev_base + LRE_C)) = (*((volatile unsigned long *) (mapped_dev_base + LRE_C)) | (1 << 10));
+	
+
+}
+
+void hsrd_deamonize()
+{
+	pid_t pid, sid;
+
+    /* already a daemon */
+    if ( getppid() == 1 ) return;
+
+    /* Fork off the parent process */
+    pid = fork();
+    if (pid < 0) {
+        exit(EXIT_FAILURE);
+    }
+    /* If we got a good PID, then we can exit the parent process. */
+    if (pid > 0) {
+        exit(EXIT_SUCCESS);
+    }
+
+    /* At this point we are executing as the child process */
+
+    /* Change the file mode mask */
+    umask(0);
+
+    /* Create a new SID for the child process */
+    sid = setsid();
+    if (sid < 0) {
+        exit(EXIT_FAILURE);
+    }
+
+    /* Change the current working directory.  This prevents the current
+       directory from being locked; hence not being able to remove it. */
+    if ((chdir("/")) < 0) {
+        exit(EXIT_FAILURE);
+    }
+
+    /* Redirect standard files to /dev/null */
+    freopen( "/dev/null", "r", stdin);
+    freopen( "/dev/null", "w", stdout);
+    freopen( "/dev/null", "w", stderr);
+    
+    /* Open the log file */
+    openlog ("wrsw_hsrd", LOG_PID, LOG_DAEMON);
 
 }
 
 int main(int argc, char *argv[])
 {
+	struct NodeTable hsr_nodes_table[MAX_HSR_NODES];
+	struct hsrInfo hsr_config;
 	
-	init_hsr();
+	load_config(&hsr_config, argv[1]);
 	
-	//while(1){
-		
-		
-		
-	//}
+	if (!hsr_config.enabled) 
+	
+		return 0;
+	
+	hsrd_deamonize();
+	
+	init_hsr(&hsr_config);
+	
+	
+
+    while (1)
+    {
+        syslog (LOG_NOTICE, "wrsw_hsrd daemon started.");
+        sleep (20);
+    }
+
+    syslog (LOG_NOTICE, "wrsw_hsrd daemon terminated.");
+    closelog();
+
+    return EXIT_SUCCESS;
 	
 	return 0;
 }
