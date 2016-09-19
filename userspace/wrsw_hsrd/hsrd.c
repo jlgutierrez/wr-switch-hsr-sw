@@ -46,6 +46,7 @@
 #include <linux/ip.h>
 #include <linux/udp.h>
 #include <pthread.h>
+#include <time.h>
 
 
 
@@ -65,6 +66,7 @@
 #define WR1_ACC 	0x00000020
 
 #define MAX_HSR_NODES	32
+#define MAX_HSR_BEHALF	16
 
 #define MY_DEST_MAC0	0x01
 #define MY_DEST_MAC1	0x1b
@@ -81,18 +83,31 @@
 struct hsrInfo
 {
 	int enabled;
-	int supSeq;
+	uint16_t supSeq;
 };
 
 struct NodeTable
 {
   uint8_t mac[6];
-  int supseq;
+  uint8_t redbox_mac[6];
+  int tlv0_type;
+  int tlv1_type;
+  int tlv2_type;
+  int supseq_p0;
+  int supseq_p1;
   int ttl;
 };
 
+struct BehalfTable
+{
+  uint8_t mac[6];
+};
+
 struct NodeTable hsr_nodes_table[MAX_HSR_NODES];
+struct BehalfTable behalf_nodes[MAX_HSR_BEHALF];
+
 int n_current_nodes = 0;
+int n_behalf_nodes = 0;
 int cop = 1;
 
 void load_config(struct hsrInfo *hsr_config, char *filename){
@@ -110,6 +125,7 @@ void load_config(struct hsrInfo *hsr_config, char *filename){
 		if (strstr(line, "HSR_ENABLED") != NULL) {
 			if(strstr(line, "y") != NULL) {
 				hsr_config->enabled = 1;
+				hsr_config->supSeq = 0;
 			}else{
 				hsr_config->enabled = 0;
 			}
@@ -188,14 +204,158 @@ void hsrd_deamonize()
 
 	// just for debugging...
     ///* Redirect standard files to /dev/null */
-    //freopen( "/dev/null", "r", stdin);
-    //freopen( "/dev/null", "w", stdout);
-    //freopen( "/dev/null", "w", stderr);
+    freopen( "/dev/null", "r", stdin);
+    freopen( "/dev/null", "w", stdout);
+    freopen( "/dev/null", "w", stderr);
     
     ///* Open the log file */
-    //openlog ("wrsw_hsrd", LOG_PID, LOG_DAEMON);
+    openlog ("wrsw_hsrd", LOG_PID, LOG_DAEMON);
     // end just for debugging...
 
+}
+
+int check_rtu_entries(){
+	
+	FILE * fp;
+    char * line = NULL;
+    size_t len = 0;
+    ssize_t read;
+	int behalf_entries = 0;
+	char *tmp = NULL;
+	
+	tmp = (char *) malloc(2);
+		
+	system("rm /tmp/hsr_rtu_redbox.list");
+	system("/wr/bin/rtu_stat | grep DYNAMIC | awk -F ' ' '{ print $1,$2 }' | grep -v ' 1' | grep -v ' 2' | awk '{ print $1 }' >/tmp/hsr_rtu_redbox.list");
+	system("sed -i 's/://g' /tmp/hsr_rtu_redbox.list");
+	
+
+    fp = fopen("/tmp/hsr_rtu_redbox.list", "r");
+    if (fp == NULL)
+        exit(EXIT_FAILURE);
+
+    while ((read = getline(&line, &len, fp)) != -1) {
+		strcpy(behalf_nodes[behalf_entries].mac,line);
+		behalf_entries++;
+    }
+    
+    n_behalf_nodes = behalf_entries;
+    
+
+    fclose(fp);
+    if (line)
+        free(line);
+    if (tmp)
+		free(tmp);
+	
+	return behalf_entries;
+}
+
+void send_HSR_sup_behalf(char *iface, struct hsrInfo *hsr_config, char *danh_mac){
+	
+	int sockfd;
+	struct ifreq if_idx;
+	struct ifreq if_mac;
+	int tx_len = 0;
+	char sendbuf[BUF_SIZ];
+	struct ether_header *eh = (struct ether_header *) sendbuf;
+	struct iphdr *iph = (struct iphdr *) (sendbuf + sizeof(struct ether_header));
+	struct sockaddr_ll socket_address;
+	char ifName[IFNAMSIZ];
+	char tmp[2];
+	
+	/* Get interface name */
+	strcpy(ifName, iface);
+
+	/* Open RAW socket to send on */
+	if ((sockfd = socket(AF_PACKET, SOCK_RAW, IPPROTO_RAW)) == -1) {
+	    perror("socket");
+	}
+
+	/* Get the index of the interface to send on */
+	memset(&if_idx, 0, sizeof(struct ifreq));
+	strncpy(if_idx.ifr_name, ifName, IFNAMSIZ-1);
+	if (ioctl(sockfd, SIOCGIFINDEX, &if_idx) < 0)
+	    perror("SIOCGIFINDEX");
+	/* Get the MAC address of the interface to send on */
+	memset(&if_mac, 0, sizeof(struct ifreq));
+	strncpy(if_mac.ifr_name, ifName, IFNAMSIZ-1);
+	if (ioctl(sockfd, SIOCGIFHWADDR, &if_mac) < 0)
+	    perror("SIOCGIFHWADDR");
+
+	/* Construct the Ethernet header */
+	memset(sendbuf, 0, BUF_SIZ);
+	/* Ethernet header */
+	eh->ether_shost[0] = ((uint8_t *)&if_mac.ifr_hwaddr.sa_data)[0];
+	eh->ether_shost[1] = ((uint8_t *)&if_mac.ifr_hwaddr.sa_data)[1];
+	eh->ether_shost[2] = ((uint8_t *)&if_mac.ifr_hwaddr.sa_data)[2];
+	eh->ether_shost[3] = ((uint8_t *)&if_mac.ifr_hwaddr.sa_data)[3];
+	eh->ether_shost[4] = ((uint8_t *)&if_mac.ifr_hwaddr.sa_data)[4];
+	eh->ether_shost[5] = ((uint8_t *)&if_mac.ifr_hwaddr.sa_data)[5];
+	eh->ether_dhost[0] = MY_DEST_MAC0;
+	eh->ether_dhost[1] = MY_DEST_MAC1;
+	eh->ether_dhost[2] = MY_DEST_MAC2;
+	eh->ether_dhost[3] = MY_DEST_MAC3;
+	eh->ether_dhost[4] = MY_DEST_MAC4;
+	eh->ether_dhost[5] = MY_DEST_MAC5;
+	/* Ethertype field */
+	eh->ether_type = htons("0x88fb");
+	tx_len += sizeof(struct ether_header);
+	sendbuf[tx_len-2] = 0x88; //ethertype
+	sendbuf[tx_len-1] = 0xfb; //ethertype
+	/* Packet data */
+	//sendbuf[tx_len++] = 0x88; //ethertype
+	//sendbuf[tx_len++] = 0xfb; //ethertype
+	sendbuf[tx_len++] = 0x00; //SupPath = 0
+	sendbuf[tx_len++] = 0x01; //SupVersion = 1
+	//tx_len++;
+	sendbuf[tx_len++] = (uint16_t)(hsr_config->supSeq); //SupSequenceNumber
+	tx_len++;
+	sendbuf[tx_len++] = 0x17; //TLV1.type = 23
+	sendbuf[tx_len++] = 0x06; //TLV1.length = 6
+
+	sprintf(tmp,"%c%c", danh_mac[0], danh_mac[1]); //NODE MAC
+	sendbuf[tx_len++] = (int)strtol(tmp, NULL, 16); //NODE MAC
+	sprintf(tmp,"%c%c", danh_mac[2], danh_mac[3]); //NODE MAC
+	sendbuf[tx_len++] = (int)strtol(tmp, NULL, 16); //NODE MAC
+	sprintf(tmp,"%c%c", danh_mac[4], danh_mac[5]); //NODE MAC
+	sendbuf[tx_len++] = (int)strtol(tmp, NULL, 16); //NODE MAC
+	sprintf(tmp,"%c%c", danh_mac[6], danh_mac[7]); //NODE MAC
+	sendbuf[tx_len++] = (int)strtol(tmp, NULL, 16); //NODE MAC
+	sprintf(tmp,"%c%c", danh_mac[8], danh_mac[9]); //NODE MAC
+	sendbuf[tx_len++] = (int)strtol(tmp, NULL, 16); //NODE MAC
+	sprintf(tmp,"%c%c", danh_mac[10], danh_mac[11]); //NODE MAC
+	sendbuf[tx_len++] = (int)strtol(tmp, NULL, 16); //NODE MAC
+
+	sendbuf[tx_len++] = 0x1E; //TLV2.type = 30
+	sendbuf[tx_len++] = 0x06; //TLV2.length = 6
+	sendbuf[tx_len++] = ((uint8_t *)&if_mac.ifr_hwaddr.sa_data)[0]; //REDBOX MAC
+	sendbuf[tx_len++] = ((uint8_t *)&if_mac.ifr_hwaddr.sa_data)[1]; //REDBOX MAC
+	sendbuf[tx_len++] = ((uint8_t *)&if_mac.ifr_hwaddr.sa_data)[2]; //REDBOX MAC
+	sendbuf[tx_len++] = ((uint8_t *)&if_mac.ifr_hwaddr.sa_data)[3]; //REDBOX MAC
+	sendbuf[tx_len++] = ((uint8_t *)&if_mac.ifr_hwaddr.sa_data)[4]; //REDBOX MAC
+	sendbuf[tx_len++] = ((uint8_t *)&if_mac.ifr_hwaddr.sa_data)[5]; //REDBOX MAC
+	sendbuf[tx_len++] = 0x00; //TLV0.type = 0
+	sendbuf[tx_len++] = 0x00; //TLV0.length = 0
+	
+	/* Index of the network device */
+	socket_address.sll_ifindex = if_idx.ifr_ifindex;
+	/* Address length*/
+	socket_address.sll_halen = ETH_ALEN;
+	/* Destination MAC */
+	socket_address.sll_addr[0] = MY_DEST_MAC0;
+	socket_address.sll_addr[1] = MY_DEST_MAC1;
+	socket_address.sll_addr[2] = MY_DEST_MAC2;
+	socket_address.sll_addr[3] = MY_DEST_MAC3;
+	socket_address.sll_addr[4] = MY_DEST_MAC4;
+	socket_address.sll_addr[5] = MY_DEST_MAC5;
+
+	/* Send packet */
+	if (sendto(sockfd, sendbuf, tx_len, 0, (struct sockaddr*)&socket_address, sizeof(struct sockaddr_ll)) < 0)
+	    printf("Send failed\n");
+	
+	close(sockfd);
+	
 }
 
 void send_HSR_supervision(char *iface, struct hsrInfo *hsr_config){
@@ -252,7 +412,10 @@ void send_HSR_supervision(char *iface, struct hsrInfo *hsr_config){
 	/* Packet data */
 	//sendbuf[tx_len++] = 0x88; //ethertype
 	//sendbuf[tx_len++] = 0xfb; //ethertype
-	sendbuf[tx_len++] = 0x00; //SupPath = 0
+	if (strcmp(iface, "wr1") == 0)
+		sendbuf[tx_len++] = 0x00; //SupPath = 0 (left)
+	else
+		sendbuf[tx_len++] = 0x01; //SupPath = 1 (right)
 	sendbuf[tx_len++] = 0x01; //SupVersion = 1
 	tx_len++;
 	sendbuf[tx_len++] = (uint16_t)(hsr_config->supSeq); //SupSequenceNumber
@@ -306,7 +469,8 @@ void *recv_HSR_supervision(char *iface){
 	uint8_t buf[BUF_SIZ];
 	char ifName[IFNAMSIZ];
 	
-	uint8_t mac[6];
+	uint8_t mac[6], redbox_mac[6];
+	int tlv0, tlv1, tlv2, path;
 	int seq;
 	
 	//mac = (char *)malloc(12);
@@ -376,20 +540,36 @@ repeat:
 	// update entry
 	cop = 0;
 	
-	mac[0]=buf[6];
-    mac[1]=buf[7];
-    mac[2]=buf[8];
-    mac[3]=buf[9];
-    mac[4]=buf[10];
-    mac[5]=buf[11];
+	// NODE'S MAC
+	mac[0]=buf[20];
+    mac[1]=buf[21];
+    mac[2]=buf[22];
+    mac[3]=buf[23];
+    mac[4]=buf[24];
+    mac[5]=buf[25];
     
+    // REDBOX'S MAC
+    redbox_mac[0]=buf[6];
+    redbox_mac[1]=buf[7];
+    redbox_mac[2]=buf[8];
+    redbox_mac[3]=buf[9];
+    redbox_mac[4]=buf[10];
+    redbox_mac[5]=buf[11];
+    
+    // SUPSEQUENCE NUMBER
     seq = (int) buf[17];
+    
+    // TLVs
+    tlv0 = (int) buf[34];
+    tlv1 = (int) buf[26];
+    tlv2 = (int) buf[18];
+    
+    // Frame path
+    path = (int) buf[14];
+    
 	
-	update_table(mac, seq);
+	update_table(mac, redbox_mac, seq, tlv0, tlv1, tlv2, path);
 	cop = 1;
-	//free resource
-	
-	// bytes 7-11  mac origen
 	
 
 done:	goto repeat;
@@ -398,17 +578,25 @@ done:	goto repeat;
 	
 }
 
-int update_table(uint8_t *mac, int seq){
+int update_table(uint8_t *mac, uint8_t *redbox_mac, int seq, int tlv0,
+						int tlv1, int tlv2, int path){
 	
 	int pos = 0;
-	
+
 	pos = check_entry(mac, seq);
 	if (pos == -1){
 		printf("Ring fully booked!\n");
 		return -2;
 	}else{
 		strcpy(hsr_nodes_table[pos].mac,mac);
-		hsr_nodes_table[pos].supseq = seq;
+		strcpy(hsr_nodes_table[pos].redbox_mac,redbox_mac);
+		if(path == 0)
+			hsr_nodes_table[pos].supseq_p0 = seq;
+		else
+			hsr_nodes_table[pos].supseq_p1 = seq;
+		hsr_nodes_table[pos].tlv0_type = tlv0;
+		hsr_nodes_table[pos].tlv1_type = tlv1;
+		hsr_nodes_table[pos].tlv2_type = tlv2;
 		hsr_nodes_table[pos].ttl = 60;
 	}
 }
@@ -458,7 +646,17 @@ void forget_node(int i){
 		hsr_nodes_table[j].mac[3] = hsr_nodes_table[j+1].mac[3];
 		hsr_nodes_table[j].mac[4] = hsr_nodes_table[j+1].mac[4];
 		hsr_nodes_table[j].mac[5] = hsr_nodes_table[j+1].mac[5];
-		hsr_nodes_table[j].supseq = hsr_nodes_table[j+1].supseq;
+		hsr_nodes_table[j].redbox_mac[0] = hsr_nodes_table[j+1].redbox_mac[0];
+		hsr_nodes_table[j].redbox_mac[1] = hsr_nodes_table[j+1].redbox_mac[1];
+		hsr_nodes_table[j].redbox_mac[2] = hsr_nodes_table[j+1].redbox_mac[2];
+		hsr_nodes_table[j].redbox_mac[3] = hsr_nodes_table[j+1].redbox_mac[3];
+		hsr_nodes_table[j].redbox_mac[4] = hsr_nodes_table[j+1].redbox_mac[4];
+		hsr_nodes_table[j].redbox_mac[5] = hsr_nodes_table[j+1].redbox_mac[5];
+		hsr_nodes_table[j].tlv0_type = hsr_nodes_table[j+1].tlv0_type;
+		hsr_nodes_table[j].tlv1_type = hsr_nodes_table[j+1].tlv1_type;
+		hsr_nodes_table[j].tlv2_type = hsr_nodes_table[j+1].tlv2_type;
+		hsr_nodes_table[j].supseq_p0 = hsr_nodes_table[j+1].supseq_p0;
+		hsr_nodes_table[j].supseq_p1 = hsr_nodes_table[j+1].supseq_p1;
 		hsr_nodes_table[j].ttl = hsr_nodes_table[j+1].ttl;
 	}
 	n_current_nodes--;
@@ -469,33 +667,115 @@ void print_table(){
 	int i = 0;
 	
 	printf("\nHSR Supervision Table:");
-	printf("\nNodes in ring: %d\n", n_current_nodes);
-	if(n_current_nodes!=0) printf("\nOrig. MAC Addr\t\tSupSeqNumber\tTTL");
+	printf("\nNodes in ring: %d (+ %d on my behalf)\n", n_current_nodes, n_behalf_nodes);
+	if(n_current_nodes!=0) printf("\nOrig. MAC Addr\tRedbox MAC Addr\t\t\tTLV0\tTLV1\tTLV2\tnseq_0\tnseq_1\tTTL");
 	for (i=0; i<n_current_nodes; i++){
 		
-		printf("\nNode: %02x:%02x:%02x:%02x:%02x:%02x\t\t%d\t%d\n", 
+		printf("\nNode: %02x:%02x:%02x:%02x:%02x:%02x\t%02x:%02x:%02x:%02x:%02x:%02x\t%d\t%d\t%d\t%d\t%d\t%d", 
 		hsr_nodes_table[i].mac[0], 
 		hsr_nodes_table[i].mac[1], 
 		hsr_nodes_table[i].mac[2],
 		hsr_nodes_table[i].mac[3], 
 		hsr_nodes_table[i].mac[4], 
-		hsr_nodes_table[i].mac[5], 
-		hsr_nodes_table[i].supseq,
+		hsr_nodes_table[i].mac[5],
+		hsr_nodes_table[i].redbox_mac[0], 
+		hsr_nodes_table[i].redbox_mac[1], 
+		hsr_nodes_table[i].redbox_mac[2],
+		hsr_nodes_table[i].redbox_mac[3], 
+		hsr_nodes_table[i].redbox_mac[4], 
+		hsr_nodes_table[i].redbox_mac[5],  
+		hsr_nodes_table[i].tlv0_type,
+		hsr_nodes_table[i].tlv1_type,
+		hsr_nodes_table[i].tlv2_type,
+		hsr_nodes_table[i].supseq_p0,
+		hsr_nodes_table[i].supseq_p1,
 		hsr_nodes_table[i].ttl);
 	}
+	printf("\n");
 	
 }
+
+void save_log()
+{
+	char output[500];
+	char *filename = "/tmp/wrsw_hsrd.log";
+	int i;
+	
+	time_t rawtime;
+	struct tm * timeinfo;
+    
+    FILE *fp = fopen(filename, "ab");
+    if (fp == NULL)
+		return -1;
+    
+    if (n_current_nodes>0 || n_behalf_nodes>0){
+		sprintf(output,"\n**********************************************************************************************\n");
+		fputs(output, fp);
+		time ( &rawtime );
+		timeinfo = localtime ( &rawtime );
+		sprintf (output,"Time: %s", asctime (timeinfo),200);
+		fputs(output, fp);
+		sprintf(output,"\nOrig. MAC Addr\t\tRedbox MAC Addr\t\tTLV0\tTLV1\tTLV2\tnseq_0\tnseq_1\tTTL\n");
+		fputs(output, fp);
+	}
+    
+	for (i=0; i<n_current_nodes; i++){
+		
+		sprintf(output,"%02x:%02x:%02x:%02x:%02x:%02x\t%02x:%02x:%02x:%02x:%02x:%02x\t%d\t%d\t%d\t%d\t%d\t%d\n", 
+		hsr_nodes_table[i].mac[0], 
+		hsr_nodes_table[i].mac[1], 
+		hsr_nodes_table[i].mac[2],
+		hsr_nodes_table[i].mac[3], 
+		hsr_nodes_table[i].mac[4], 
+		hsr_nodes_table[i].mac[5],
+		hsr_nodes_table[i].redbox_mac[0], 
+		hsr_nodes_table[i].redbox_mac[1], 
+		hsr_nodes_table[i].redbox_mac[2],
+		hsr_nodes_table[i].redbox_mac[3], 
+		hsr_nodes_table[i].redbox_mac[4], 
+		hsr_nodes_table[i].redbox_mac[5],  
+		hsr_nodes_table[i].tlv0_type,
+		hsr_nodes_table[i].tlv1_type,
+		hsr_nodes_table[i].tlv2_type,
+		hsr_nodes_table[i].supseq_p0,
+		hsr_nodes_table[i].supseq_p1,
+		hsr_nodes_table[i].ttl, 500);
+
+		fputs(output, fp);
+		
+	}
+	
+	if (n_behalf_nodes>0){
+		sprintf(output,"\nOwn nodes on my behalf");
+		fputs(output, fp);
+	}
+    
+    for (i=0; i<n_behalf_nodes; i++){
+		sprintf(output,"\n%s", behalf_nodes[i].mac,100);
+		fputs(output, fp);
+	}
+    
+    if (n_current_nodes>0 || n_behalf_nodes>0){
+		sprintf(output,"\n**********************************************************************************************\n");
+		fputs(output, fp);
+	}
+	
+	fclose(fp);	
+    
+}
+
 int main(int argc, char *argv[])
 {
 	struct hsrInfo hsr_config;
 	
 	pthread_t threads[2];
-	int rc;
+	int rc, i;
+	char tmp[2];
 	
 	load_config(&hsr_config, argv[1]);
 	
 	if (!hsr_config.enabled) 
-		return 0;
+		//return 0;
 		
 	hsr_config.supSeq = 0;
 	
@@ -524,7 +804,13 @@ int main(int argc, char *argv[])
 		hsr_config.supSeq++;
         sleep (2);
         update_ttl();
-        print_table();
+        check_rtu_entries();
+        for( i = 0; i<n_behalf_nodes; i++){
+			send_HSR_sup_behalf("wr1", &hsr_config, behalf_nodes[i].mac);
+			send_HSR_sup_behalf("wr2", &hsr_config, behalf_nodes[i].mac);
+		}
+		print_table();
+		save_log();
     }
 
     syslog (LOG_NOTICE, "wrsw_hsrd daemon terminated.");
