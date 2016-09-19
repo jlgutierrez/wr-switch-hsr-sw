@@ -304,13 +304,13 @@ void send_HSR_sup_behalf(char *iface, struct hsrInfo *hsr_config, char *danh_mac
 	sendbuf[tx_len-2] = 0x88; //ethertype
 	sendbuf[tx_len-1] = 0xfb; //ethertype
 	/* Packet data */
-	//sendbuf[tx_len++] = 0x88; //ethertype
-	//sendbuf[tx_len++] = 0xfb; //ethertype
-	sendbuf[tx_len++] = 0x00; //SupPath = 0
+	if (strcmp(iface, "wr1") == 0)
+		sendbuf[tx_len++] = 0x00; //SupPath = 0 (left)
+	else
+		sendbuf[tx_len++] = 0x01; //SupPath = 1 (right)
 	sendbuf[tx_len++] = 0x01; //SupVersion = 1
-	//tx_len++;
-	sendbuf[tx_len++] = (uint16_t)(hsr_config->supSeq); //SupSequenceNumber
 	tx_len++;
+	sendbuf[tx_len++] = (uint16_t)(hsr_config->supSeq); //SupSequenceNumber
 	sendbuf[tx_len++] = 0x17; //TLV1.type = 23
 	sendbuf[tx_len++] = 0x06; //TLV1.length = 6
 
