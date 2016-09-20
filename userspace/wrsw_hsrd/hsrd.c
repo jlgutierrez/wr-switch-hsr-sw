@@ -69,10 +69,10 @@
 #define MAX_HSR_BEHALF	16
 
 #define MY_DEST_MAC0	0x01
-#define MY_DEST_MAC1	0x1b
-#define MY_DEST_MAC2	0x19
+#define MY_DEST_MAC1	0x15
+#define MY_DEST_MAC2	0x4E
 #define MY_DEST_MAC3	0x00
-#define MY_DEST_MAC4	0x00
+#define MY_DEST_MAC4	0x01
 #define MY_DEST_MAC5	0x00
 
 #define DEFAULT_IF	"wr1"
@@ -164,7 +164,6 @@ void init_hsr(struct hsrInfo *hsr_config){
 	
 	//Clear all registers.
 	*((volatile unsigned long *) (mapped_dev_base + LRE_C)) = (*((volatile unsigned long *) (mapped_dev_base + LRE_C)) | (1 << 10));
-	
 
 }
 
@@ -775,7 +774,7 @@ int main(int argc, char *argv[])
 	load_config(&hsr_config, argv[1]);
 	
 	if (!hsr_config.enabled) 
-		//return 0;
+		return 0;
 		
 	hsr_config.supSeq = 0;
 	

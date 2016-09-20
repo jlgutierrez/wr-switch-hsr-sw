@@ -20,4 +20,5 @@ insmod $WR_HOME/lib/modules/wr-nic.ko macaddr=$val
 insmod $WR_HOME/lib/modules/wr_rtu.ko
 insmod $WR_HOME/lib/modules/wr_pstats.ko pstats_nports=18
 $WR_HOME/sbin/start-daemons.sh
+sleep 1
 $WR_HOME/sbin/copy-hsr-regs.sh
