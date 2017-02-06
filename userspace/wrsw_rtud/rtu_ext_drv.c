@@ -280,8 +280,8 @@ void rtux_set_feature_ctrl(int mr, int mac_ptp, int mac_ll, int mac_single,
 		mask = RTU_RX_CTR_FF_MAC_SINGLE | mask;
 	if (mac_range)
 		mask = RTU_RX_CTR_FF_MAC_RANGE | mask;
-	if (mac_br)
-		mask = RTU_RX_CTR_FF_MAC_BR | mask;
+	//if (mac_br)
+		//mask = RTU_RX_CTR_FF_MAC_BR | mask; // quitarlo para HSR-BR
 	if (at_fm)
 		mask = RTU_RX_CTR_AT_FMATCH_TOO_SLOW | mask;
 

@@ -74,6 +74,7 @@ static int rtu_create_static_entries()
 	hexp_port_list_t ports;
 	int i, err;
 	uint32_t enabled_port_mask = 0;
+	uint32_t enabled_port_mask_br_hsr = 0;
 
 	halexp_query_ports(&ports);
 
@@ -117,11 +118,14 @@ static int rtu_create_static_entries()
 			return err;
 	}
 
+	enabled_port_mask_br_hsr = enabled_port_mask;
+	enabled_port_mask_br_hsr = enabled_port_mask_br_hsr & ~(1 << 2);
+	
 	// Broadcast MAC
 	TRACE(TRACE_INFO, "adding static route for broadcast MAC...");
 	err =
 	    rtu_fd_create_entry(bcast_mac, 0,
-				enabled_port_mask | (1 << ports.
+				enabled_port_mask_br_hsr | (1 << ports.
 						     num_physical_ports),
 				STATIC, OVERRIDE_EXISTING);
 	err =

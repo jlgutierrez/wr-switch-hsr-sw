@@ -17,9 +17,9 @@ CFLAGS		= -O2 -Wall -ggdb  \
 		-I../mini-rpc -I../include -I$(WR_INCLUDE) -I$(LINUX)/include
 # -I$(CROSS_COMPILE_ARM_PATH)/../include
 
-ifdef WRS_RTUD_DEBUG
+#ifdef WRS_RTUD_DEBUG
   CFLAGS += -DDEBUG
-endif
+#endif
 
 
 LDFLAGS 	:= -L../libptpnetif -L../libswitchhw -L../mini-rpc\
